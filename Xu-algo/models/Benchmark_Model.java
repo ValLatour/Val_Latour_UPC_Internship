@@ -7,6 +7,9 @@ import java.io.BufferedWriter;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.util.List;
+import static java.lang.Math.max;
+import static java.lang.Math.min;
+
 
 public class Benchmark_Model implements Model {
 
@@ -14,14 +17,11 @@ public class Benchmark_Model implements Model {
     GRBModel model;
     GRBVar[][][] x;
     GRBVar[] z;
-    int nf;
     int nt;
     int nj;
     int nk;
-    int nc;
-    int np;
 
-    public static String model_name(){return "Benchmark";}
+    public String model_name(){return "Benchmark";}
 
     public Benchmark_Model(){
         //Model
@@ -30,6 +30,7 @@ public class Benchmark_Model implements Model {
         model.set(GRB.StringAttr.ModelName, "Benchmark model");
     }
 
+    @Override
     public void init_model(  double alph,
                         double gam,
                         double delt,
@@ -37,28 +38,25 @@ public class Benchmark_Model implements Model {
                         String[] K,  
                         String[] J,
                         double[][]r,    // r[k][j]
-                        List<Integer>[] Kf, //Kf[f] is the list of indexes of flight f's trajectory in K
+                        List<List<Integer>> Kf, //Kf[f] is the list of indexes of flight f's trajectory in K
                         String[] C,    //array containing all the configurations
                         int [][] Ca, //index of configurations grouped by area control center 
                         int[][] Sl,  // Sl[l] gives an array listing the configurations containing the sector l
-                        double[] T, //T is the ordered set of time
+                        Integer[] T, //T is the ordered set of time
                         int[][] P, // P = [...;[ind_begin;ind_end];...] periods of T
                         int[][][] Tfkj, // Tfkj[k][j] is an ordered array of time indexes where the flight following k can be in j the indexes are counted from 1
                         int[][]Jfki, // Jfki[k][i] is the ith elementary sector the flight following k passes through 
                         double[] D, // indexed by K
                         double[] E, // indexed by K
-                        int [][][] TC, // TC[k][j][jp] is the time needed (in number of time steps) for the flight following k to get from j to jp (sectors)
+                        int [][] TC, // TC[k][j][jp] is the time needed (in number of time steps) for the flight following k to get from j to jp (sectors)
                                         // if k does not go from j to jp let TC[k][j][jp] be superior to T.length
                         int [][] cap,  //cap[l][p] is the capacity of sector l during the period indexed p
                         int [][][] Jktol, // Jktol[l][p][k] represent the first elementary sector for k that function in l in time period p
                         int M)
         {
-        int nf = F.length;
         int nt = T.length;
         int nj = J.length;
         int nk = K.length;
-        int nc = C.length;
-        int np = P.length;
 
         try{
             long start_model_init_time = System.currentTimeMillis();
@@ -98,7 +96,7 @@ public class Benchmark_Model implements Model {
             System.out.println("Creating objective function");
             GRBLinExpr obj = new GRBLinExpr();
             for(int f=0; f<nf;f++){
-                for(int k:Kf[f]){
+                for(int k:Kf.get(f)){
                     //cost of delay
                     int j = Jfki[k][0];
                     for (int ti : Tfkj[k][j]){
@@ -114,7 +112,7 @@ public class Benchmark_Model implements Model {
             System.out.println("Creating constraint counting entries");
             for (int k=0;k<nk;k++){
                 for (int j = 0; j <nj; j++){
-                    for (int t = 0; t < nt; t++){
+                    for (int t = 1; t < nt+1; t++){
                         GRBLinExpr e_counting_x = new GRBLinExpr();
                         e_counting_x.addTerm(1,x[k][j][t]);
                         e_counting_x.addTerm(-1,x[k][j][t-1]);
@@ -130,7 +128,7 @@ public class Benchmark_Model implements Model {
             System.out.println("Creating constraint one trajectory per flight");
             for(int f=0; f<nf;f++){
                 GRBLinExpr Itraj_f = new GRBLinExpr() ;
-                for (int k : Kf[f]){
+                for (int k : Kf.get(f)){
                     Itraj_f.addTerm(1,z[k]);
                 }
                 model.addConstr(Itraj_f,GRB.EQUAL,1,"Only_one "+F[f]);
@@ -139,7 +137,7 @@ public class Benchmark_Model implements Model {
             //Constraint minimal & maximal arrival time in sector
             System.out.println("Creating constraints minimal & maximal arrival time in sector");
             for(int f=0; f<nf;f++){
-                for (int k:Kf[f]){
+                for (int k:Kf.get(f)){
                     for (int j = 0; j <nj; j++){
                         int before = Tfkj[k][j][0]-1;                   //index of time before possibility of arrival
                         int last = Tfkj[k][j][Tfkj[k][j].length -1];    //last index of time for arrival
@@ -156,9 +154,9 @@ public class Benchmark_Model implements Model {
             }
 
             //Constraint "if we previously arrived, it is true in the future"
-            System.out.println("Creating contraints definitive arrival");
+            System.out.println("Creating constraints definitive arrival");
             for(int f=0; f<nf;f++){
-                for (int k: Kf[f]){
+                for (int k: Kf.get(f)){
                     for (int j = 0; j <nj; j++){
                         for (int t = 1; t < nt+1; t++){
                             GRBLinExpr arrived = new GRBLinExpr();
@@ -172,13 +170,13 @@ public class Benchmark_Model implements Model {
             }
 
             //Constraint "no airborne delay"
-            System.out.println("Creating contraints no airborne delay");
+            System.out.println("Creating constraints no airborne delay");
             for(int f=0; f<nf;f++){
-                for (int k: Kf[f]){
+                for (int k: Kf.get(f)){
                     int jactu = Jfki[k][0];
                     for (int i=1;i<Jfki[k].length;i++){
                         int jnext = Jfki[k][i];
-                        int travel_time = TC[k][jactu][jnext];
+                        int travel_time = TC[k][jactu];
                         for (int t = 0; t < nt+1 - travel_time; t++){
                             GRBLinExpr arrived = new GRBLinExpr();
                             arrived.addTerm(1,x[k][jnext][t+travel_time]);
@@ -197,7 +195,7 @@ public class Benchmark_Model implements Model {
                 for (int p= 0 ;p<np; p++){
                     GRBLinExpr entry_count_sum = GRBLinExpr();
                     for(int f=0; f<nf;f++){
-                        for (int k:Kf[f]){
+                        for (int k:Kf.get(f)){
                             int j = Jktol[l][p][k];
                             int begin = max(Tfkj[k][j][0],P[p][0]);
                             int last = min(Tfkj[k][j][Tfkj[k][j].length -1],P[p][1]);
@@ -232,7 +230,7 @@ public class Benchmark_Model implements Model {
         env.dispose();
     }
 
-
+    @Override
     public boolean solve(   String log_file,
                             int time_limit_seconds,
                             double heuristics_value,
@@ -269,7 +267,7 @@ public class Benchmark_Model implements Model {
 
             if(model.get(GRB.IntAttr.Status) == GRB.Status.OPTIMAL) {
                 success = true;
-                System.out.println("Resolution succesfull");
+                System.out.println("Resolution successful");
                 // Extract solution
                 System.out.println("Extracting solution");
                 x_res = new int[nk][nj][nt+1]; 
@@ -286,7 +284,7 @@ public class Benchmark_Model implements Model {
                 }
             }
             else {
-                System.out.println("Resolution unsuccesfull");
+                System.out.println("Resolution unsuccessful");
             }
         }
         catch (GRBException e) {
@@ -296,6 +294,9 @@ public class Benchmark_Model implements Model {
         }
         return success;
     }
+
+
+    @Override
     public void print_solution( double alph,
                                 double gam,
                                 double delt,
@@ -303,17 +304,17 @@ public class Benchmark_Model implements Model {
                                 String[] K,  
                                 String[] J,
                                 double[][]r,    // r[k][j]
-                                List<Integer>[] Kf, //Kf[f] is the list of indexes of flight f's trajectory in K
+                                List<List<Integer>>  Kf, //Kf[f] is the list of indexes of flight f's trajectory in K
                                 String[] C,    //array containing all the configurations
                                 int [][] Ca, //index of configurations grouped by area control center 
                                 int[][] Sl,  // Sl[l] gives an array listing the configurations containing the sector l
-                                double[] T, //T is the ordered set of time
+                                Integer[]  T, //T is the ordered set of time
                                 int[][] P, // P = [...;[ind_begin;ind_end];...] periods of T
                                 int[][][] Tfkj, // Tfkj[k][j] is an ordered array of time indexes where the flight following k can be in j the indexes are counted from 1
                                 int[][]Jfki, // Jfki[k][i] is the ith elementary sector the flight following k passes through 
                                 double[] D, // indexed by K
                                 double[] E, // indexed by K
-                                int [][][] TC, // TC[k][j][jp] is the time needed (in number of time steps) for the flight following k to get from j to jp (sectors)
+                                int [][] TC, // TC[k][j][jp] is the time needed (in number of time steps) for the flight following k to get from j to jp (sectors)
                                                 // if k does not go from j to jp let TC[k][j][jp] be superior to T[].length
                                 int [][] cap,  //cap[l][p] is the capacity of sector l during the period indexed p
                                 int [][][] Jktol, // Jktol[l][p][k] represent the first elementary sector for k that function in l in time period p
@@ -323,10 +324,7 @@ public class Benchmark_Model implements Model {
                                 int[][] u_res,
                                 String output_filename) {
 
-        int nf = F.length;
         int nt = T.length;
-        int nc = C.length;
-        int np = P.length;
                                                 
         try {
             BufferedWriter bw = new BufferedWriter(new FileWriter(output_filename));
@@ -336,7 +334,7 @@ public class Benchmark_Model implements Model {
             bw.write("Selected trajectories:\n");
             
             for (int f = 0; f<nf;f++){
-                for (int k : Kf[f]){
+                for (int k : Kf.get(f)){
                     if (z_res[k]==1){
                         int j = Jfki[k][0];
                         int t=1;

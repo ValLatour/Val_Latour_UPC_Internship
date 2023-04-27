@@ -158,6 +158,6 @@ public class Main {
         mod.print_solution(alph, gam, delt, F, K, J, r, Kf, C, Ca, Sl, T, P, Tfkj, Jfki, D, E, TC, cap, Jktol, M, x_res, z_res, u_res, log_file);
         mod.dispose();
 
-        System.out.println("Hola");
+        System.out.println("Finished");
     }
 }
